@@ -3,7 +3,7 @@ from ultralytics import YOLO
 from TrackingModule import EuclideanDistTracker
 
 # Kamera veya yayın linki
-stream_url = "https://hls.ibb.gov.tr/ls/cam_turistik/b_eyupsultan.stream/chunklist.m3u8"
+stream_url = "https://hls.ibb.gov.tr/ls/cam_turistik/b_kapalicarsi.stream/chunklist.m3u8"
 cap = cv2.VideoCapture(stream_url)
 
 # YOLOv8 modelini yükle
