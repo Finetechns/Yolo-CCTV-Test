@@ -2,66 +2,58 @@ import cv2
 from ultralytics import YOLO
 import numpy as np
 
-# Video dosyası
-video_path = "peoplecount1.mp4"
-cap = cv2.VideoCapture(video_path)
+stream_url = "https://hls.ibb.gov.tr/ls/cam_turistik/b_kapalicarsi.stream/chunklist.m3u8"
+cap = cv2.VideoCapture(stream_url)
 
-# YOLOv8 modelini yükle
 model = YOLO('yolov8s.pt')
 
-# Sayaçlar
 entry_count = 0
 exit_count = 0
 total_people = 0
-
-# Kapı alanı (dikey bölge)
-door_area = {
-    'left': 1350,     # Sol sınır
-    'right': 1500,    # Sağ sınır
-    'top': 540,   # Üst sınır
-    'bottom': 2100,  # Alt sınır
-    'color': (255, 255, 0)  # Sarı renk (BGR)
-}
-
-# Kişilerin geçiş durumlarını takip etmek için
-person_tracks = {}  # track_id -> {"last_x": x, "last_y": y, "counted": False, "in_area": False}
+area1 = [(748, 498), (741, 470), (986, 394), (1026, 430)]  # İlk alan için koordinatlar
+area2 = [(748, 498), (741, 470), (986, 394), (1026, 430)]  # İkinci alan için koordinatlar
+"""
+ # Eğerki farklı bir alan için test yapmak istereniz bu kodu aktif edin ve üsteki alanın kordinatlarını değiştirin.
+ # Ve aşağıdaki cv2.setMouseCallback kodunu aktif edin.
+def RGB(event, x, y, flags, param):
+    if event == cv2.EVENT_MOUSEMOVE:  
+        colorsBGR = [x, y]
+        print(colorsBGR)
+"""
+person_tracks = {} 
 
 def check_area_crossing(current_x, current_y, last_x, last_y):
     """Alan geçişini ve yönünü kontrol et"""
-    # Kişinin merkez noktası alanın içinde mi?
-    in_area = (door_area['left'] <= current_x <= door_area['right'] and 
-               door_area['top'] <= current_y <= door_area['bottom'])
+    in_area1 = cv2.pointPolygonTest(np.array(area1), (current_x, current_y), False) >= 0 
+    in_area2 = cv2.pointPolygonTest(np.array(area2), (current_x, current_y), False) >= 0
     
     # Son konum alanın içinde miydi?
-    was_in_area = (door_area['left'] <= last_x <= door_area['right'] and 
-                   door_area['top'] <= last_y <= door_area['bottom'])
+    was_in_area1 = cv2.pointPolygonTest(np.array(area1), (last_x, last_y), False) >= 0
+    was_in_area2 = cv2.pointPolygonTest(np.array(area2), (last_x, last_y), False) >= 0
+    
+    in_area = in_area1 or in_area2
+    was_in_area = was_in_area1 or was_in_area2
     
     # Alan geçişi kontrolü
     if not was_in_area and in_area:
-        # Alanın sol tarafından mı, sağ tarafından mı girdi?
-        if last_x < door_area['left']:
+        # Giriş yönü tespiti (y koordinatına göre)
+        if current_y < last_y:
             return "entry", True
-        elif last_x > door_area['right']:
+        else:
             return "exit", True
     elif was_in_area and not in_area:
-        # Alanın sol tarafına mı, sağ tarafına mı çıktı?
-        if current_x < door_area['left']:
+        # Çıkış yönü tespiti (y koordinatına göre)
+        if current_y < last_y:
             return "exit", False
-        elif current_x > door_area['right']:
+        else:
             return "entry", False
     
     return None, in_area
 
-def draw_door_area(frame):
-    # Kapı alanını çiz
-    cv2.rectangle(frame, 
-                 (door_area['left'], door_area['top']), 
-                 (door_area['right'], door_area['bottom']), 
-                 door_area['color'], 2)
-    
-    # Orta çizgiyi çiz (referans için)
-    mid_x = (door_area['left'] + door_area['right']) // 2
-    cv2.line(frame, (mid_x, door_area['top']), (mid_x, door_area['bottom']), (0, 0, 255), 1)
+def draw_areas(frame):
+    # Alanları çiz
+    cv2.polylines(frame, [np.array(area1)], True, (0, 255, 255), 2)
+    cv2.polylines(frame, [np.array(area2)], True, (0, 255, 255), 2)
     
     # Sayaç bilgilerini göster
     cv2.putText(frame, f"Giris: {entry_count}", (50, 50), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
@@ -69,12 +61,23 @@ def draw_door_area(frame):
     cv2.putText(frame, f"Icerdeki Kisi: {total_people}", (50, 130), cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
 # Video işleme döngüsü
-for result in model.track(source=video_path, show=False, stream=True, conf=0.3, iou=0.3, classes=0):
-    frame = result.orig_img
+cv2.namedWindow('Dukkan Giris-Cikis Sayaci')
+#cv2.setMouseCallback('Dukkan Giris-Cikis Sayaci', RGB)
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+        
+    # Görüntüyü küçült
+    frame = cv2.resize(frame, (1280, 720))
     
-    if result.boxes.id is not None:
-        boxes = result.boxes.xywh.cpu()  # x, y, width, height
-        track_ids = result.boxes.id.int().cpu().tolist()  # tracking IDs
+    # YOLO ile nesne tespiti
+    results = model.track(frame, persist=True, conf=0.5, iou=0.3, classes=0, verbose=False)
+    
+    if results[0].boxes.id is not None:
+        boxes = results[0].boxes.xywh.cpu()  # x, y, width, height
+        track_ids = results[0].boxes.id.int().cpu().tolist()  # tracking IDs
         
         for box, track_id in zip(boxes, track_ids):
             x, y, w, h = box
@@ -87,7 +90,8 @@ for result in model.track(source=video_path, show=False, stream=True, conf=0.3, 
                     "last_x": cx,
                     "last_y": cy,
                     "counted": False,
-                    "in_area": False
+                    "in_area": False,
+                    "direction": None
                 }
             
             # Alan geçişini kontrol et
@@ -107,17 +111,18 @@ for result in model.track(source=video_path, show=False, stream=True, conf=0.3, 
                     exit_count += 1
                     total_people = max(0, total_people - 1)
                 person_tracks[track_id]["counted"] = True
+                person_tracks[track_id]["direction"] = crossing
             
             # Kişinin rengini belirle
             if person_tracks[track_id]["in_area"]:
                 color = (0, 255, 255)  # Sarı - alan içinde
             elif person_tracks[track_id]["counted"]:
-                color = (0, 255, 0) if cx > (door_area['left'] + door_area['right'])/2 else (0, 0, 255)
+                color = (0, 255, 0) if person_tracks[track_id]["direction"] == "entry" else (0, 0, 255)
             else:
                 color = (255, 255, 255)  # Beyaz - alan dışında
             
             # Çizgiden yeterince uzaklaşınca sayım durumunu sıfırla
-            if abs(cx - (door_area['left'] + door_area['right']) / 2) > 200:
+            if abs(cy - (area1[0][1] + area1[2][1]) / 2) > 100:
                 person_tracks[track_id]["counted"] = False
             
             # Son konumu güncelle
@@ -130,8 +135,8 @@ for result in model.track(source=video_path, show=False, stream=True, conf=0.3, 
             cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
             cv2.putText(frame, f"ID:{track_id}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
     
-    draw_door_area(frame)
-    cv2.imshow("Market Giris-Cikis Sayaci", frame)
+    draw_areas(frame)
+    cv2.imshow("Dukkan Giris-Cikis Sayaci", frame)
     
     if cv2.waitKey(1) & 0xFF == ord('q'):
         break
