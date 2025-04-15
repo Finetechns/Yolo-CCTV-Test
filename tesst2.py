@@ -5,7 +5,7 @@ import numpy as np
 stream_url = "https://hls.ibb.gov.tr/ls/cam_turistik/b_kapalicarsi.stream/chunklist.m3u8"
 cap = cv2.VideoCapture(stream_url)
 
-model = YOLO('yolov8s.pt')
+model = YOLO('yolo11n.pt')
 
 entry_count = 0
 exit_count = 0
